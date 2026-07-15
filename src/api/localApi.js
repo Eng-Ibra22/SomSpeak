@@ -1,6 +1,6 @@
 import { localAuth } from './localAuth';
 
-const BASE = import.meta.env.VITE_BASE44_APP_BASE_URL || '';
+const BASE = import.meta.env.VITE_BASE44_APP_BASE_URL || window.location.origin;
 
 async function request(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };

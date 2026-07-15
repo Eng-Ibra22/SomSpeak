@@ -155,7 +155,13 @@ app.patch('/api/profile', requireAuth, (req, res) => { const { full_name, dark_m
 app.post('/api/translate', requireAuth, rateLimit(30, 60 * 1000), async (req, res) => { const { text, from, to } = req.body || {}; if (typeof text !== 'string' || !text.trim() || text.length > 500 || !['English','Arabic','Turkish','Somali'].includes(from) || !['English','Arabic','Turkish','Somali'].includes(to) || from === to) return res.status(400).json({ error: 'Provide a phrase and two different supported languages.' }); const translation = await translate(text.trim(), from, to); res.json({ translation, pronunciation: '', example_sentence: '', example_translation: '', memory_tip: 'Repeat the translation aloud, then use it in a short sentence.' }); });
 async function translate(text, from, to) { const url = process.env.TRANSLATION_API_URL; if (!url) return `[${to}] ${text}`; const languages = { English: 'en', Arabic: 'ar', Turkish: 'tr', Somali: 'so' }; const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.TRANSLATION_API_KEY ? { Authorization: `Bearer ${process.env.TRANSLATION_API_KEY}` } : {}) }, body: JSON.stringify({ q: text, source: languages[from], target: languages[to], format: 'text' }), signal: AbortSignal.timeout(10000) }); if (!response.ok) throw new Error('Translation provider unavailable.'); const data = await response.json(); return data.translatedText || data.translation || text; }
 const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production' || Boolean(process.env.RAILWAY_STATIC_URL);
-if (isProduction) { const distPath = path.join(__dirname, '..', 'dist'); app.use(express.static(distPath)); app.get('/{*splat}', (_req, res) => res.sendFile(path.join(distPath, 'index.html'))); }
+if (isProduction) {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath, { index: false }));
+  app.get(/^\/(?!api\/|assets\/|manifest\.json|favicon\.ico|.*\.[a-zA-Z0-9]+$).*/, (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Unexpected server error.' }); });
 
 if (require.main === module) app.listen(PORT, () => console.log(`Lingua API running at http://localhost:${PORT}`));

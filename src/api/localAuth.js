@@ -2,7 +2,7 @@
 // Thin wrapper over our local Express auth server (http://localhost:5000)
 // Used instead of base44.auth.* when running locally.
 
-const BASE = import.meta.env.VITE_BASE44_APP_BASE_URL || '';
+const BASE = import.meta.env.VITE_BASE44_APP_BASE_URL || window.location.origin;
 
 const TOKEN_KEY = 'lingua_local_token';
 
