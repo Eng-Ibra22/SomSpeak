@@ -2,7 +2,8 @@
 // Thin wrapper over our local Express auth server (http://localhost:5000)
 // Used instead of base44.auth.* when running locally.
 
-const BASE = import.meta.env.VITE_BASE44_APP_BASE_URL || window.location.origin;
+const ENV_BASE = import.meta.env.VITE_BASE44_APP_BASE_URL;
+const BASE = ENV_BASE === 'http://localhost:5000' ? window.location.origin : ENV_BASE || window.location.origin;
 
 const TOKEN_KEY = 'somspeak_local_token';
 

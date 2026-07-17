@@ -13,7 +13,8 @@ const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'somspeak_local_dev_secret_change_in_production');
 // SQLITE_DB_PATH is Railway-volume friendly; DATABASE_PATH remains supported for existing deployments.
 const DB_PATH = process.env.SQLITE_DB_PATH || process.env.DATABASE_PATH || path.join(__dirname, 'database.sqlite');
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',').map((value) => value.trim());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((value) => value.trim());
+const localDevOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173', 'http://0.0.0.0:5173'];
 
 if (!JWT_SECRET) throw new Error('JWT_SECRET must be set in production.');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -619,7 +620,10 @@ function smartTranslate(text, from, to) {
   };
 }
 
-app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error('Origin not allowed')); }, credentials: true }));
+app.use(cors({ origin(origin, callback) {
+  if (!origin || allowedOrigins.includes(origin) || localDevOrigins.includes(origin)) return callback(null, true);
+  callback(new Error('Origin not allowed'));
+}, credentials: true }));
 app.use(express.json({ limit: '32kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');

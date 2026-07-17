@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { localApi } from "@/api/localApi";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, CheckCircle2, Lock } from "lucide-react";
+import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import LessonCard from "../components/LessonCard";
