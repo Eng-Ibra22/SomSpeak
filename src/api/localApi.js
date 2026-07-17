@@ -23,7 +23,8 @@ export const localApi = {
   achievements:  ()         => request('GET', '/api/achievements'),
   progress:      ()         => request('GET', '/api/progress'),
   completeLesson:(id, score)=> request('PUT', `/api/progress/${encodeURIComponent(id)}`, { score }),
-  profile:       ()         => request('GET', '/api/profile'),
-  updateProfile: (data)     => request('PATCH', '/api/profile', data),
-  translate:     (text, from, to) => request('POST', '/api/translate', { text, from, to }),
+  profile:           ()              => request('GET', '/api/profile'),
+  updateProfile:     (data)          => request('PATCH', '/api/profile', data),
+  translate:         (text, from, to)=> request('POST', '/api/translate', { text, from, to }),
+  translationConfig: ()              => request('GET', '/api/translation-config'),
 };

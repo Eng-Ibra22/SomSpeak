@@ -666,57 +666,147 @@ app.put('/api/progress/:lessonId', requireAuth, (req, res) => { const lesson = d
 app.get('/api/profile', requireAuth, (req, res) => { const row = db.prepare('SELECT u.email,u.full_name,u.created_at,p.dark_mode,p.preferred_language,p.daily_goal,p.notifications_enabled FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=?').get(req.user.id); res.json({ ...row, dark_mode: Boolean(row.dark_mode), notifications_enabled: Boolean(row.notifications_enabled) }); });
 app.patch('/api/profile', requireAuth, (req, res) => { const { full_name, dark_mode, preferred_language, daily_goal, notifications_enabled } = req.body || {}; if (full_name !== undefined) db.prepare('UPDATE users SET full_name=? WHERE id=?').run(String(full_name).slice(0, 100).trim(), req.user.id); if (dark_mode !== undefined) db.prepare('UPDATE profiles SET dark_mode=? WHERE user_id=?').run(dark_mode ? 1 : 0, req.user.id); if (notifications_enabled !== undefined) db.prepare('UPDATE profiles SET notifications_enabled=? WHERE user_id=?').run(notifications_enabled ? 1 : 0, req.user.id); if (preferred_language !== undefined && ['English', 'Arabic', 'Turkish', 'Somali'].includes(preferred_language)) db.prepare('UPDATE profiles SET preferred_language=? WHERE user_id=?').run(preferred_language, req.user.id); if (daily_goal !== undefined && Number.isInteger(daily_goal) && daily_goal >= 1 && daily_goal <= 20) db.prepare('UPDATE profiles SET daily_goal=? WHERE user_id=?').run(daily_goal, req.user.id); res.json({ updated: true }); });
 
-// ─── TRANSLATE ENDPOINT (enhanced) ───────────────────────────────────────────
+// ─── TRANSLATION CONFIG (public capability check — no secrets exposed) ────────
+app.get('/api/translation-config', requireAuth, (_req, res) => {
+  const hasApi = Boolean(process.env.TRANSLATION_API_URL);
+  const hasKey = Boolean(process.env.TRANSLATION_API_KEY);
+  // Detect provider from URL heuristics so frontend can label it correctly
+  const url = process.env.TRANSLATION_API_URL || '';
+  let provider = 'generic';
+  if (url.includes('deepl')) provider = 'deepl';
+  else if (url.includes('libretranslate')) provider = 'libretranslate';
+  else if (url.includes('googleapis')) provider = 'google';
+  else if (url.includes('microsoft') || url.includes('azure')) provider = 'azure';
+  else if (hasApi) provider = 'custom';
+  res.json({ aiEnabled: hasApi, hasKey, provider });
+});
+
+// ─── TRANSLATE ENDPOINT ───────────────────────────────────────────────────────
 app.post('/api/translate', requireAuth, rateLimit(30, 60 * 1000), async (req, res) => {
   const { text, from, to } = req.body || {};
   const SUPPORTED = ['English', 'Arabic', 'Turkish', 'Somali'];
 
-  // Strict input validation
-  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'Please provide text to translate.' });
+  // ── Input validation ──
+  if (!text || typeof text !== 'string')
+    return res.status(400).json({ error: 'Please provide text to translate.', code: 'EMPTY_INPUT' });
   const trimmed = text.trim();
-  if (!trimmed) return res.status(400).json({ error: 'Text cannot be empty.' });
-  if (trimmed.length > 500) return res.status(400).json({ error: 'Text is too long. Maximum 500 characters.' });
-  if (!SUPPORTED.includes(from)) return res.status(400).json({ error: `Source language "${from}" is not supported. Choose from: ${SUPPORTED.join(', ')}.` });
-  if (!SUPPORTED.includes(to)) return res.status(400).json({ error: `Target language "${to}" is not supported. Choose from: ${SUPPORTED.join(', ')}.` });
-  if (from === to) return res.status(400).json({ error: 'Source and target languages must be different.' });
+  if (!trimmed)
+    return res.status(400).json({ error: 'Text cannot be empty.', code: 'EMPTY_INPUT' });
+  if (trimmed.length > 500)
+    return res.status(400).json({ error: 'Text is too long. Maximum 500 characters.', code: 'TOO_LONG' });
+  if (!SUPPORTED.includes(from))
+    return res.status(400).json({ error: `Source language "${from}" is not supported.`, code: 'BAD_LANGUAGE' });
+  if (!SUPPORTED.includes(to))
+    return res.status(400).json({ error: `Target language "${to}" is not supported.`, code: 'BAD_LANGUAGE' });
+  if (from === to)
+    return res.status(400).json({ error: 'Source and target languages must be different.', code: 'SAME_LANGUAGE' });
 
-  try {
-    // Try external API first if configured
-    if (process.env.TRANSLATION_API_URL) {
+  // ── Route to AI API or built-in dictionary ──
+  if (process.env.TRANSLATION_API_URL) {
+    try {
       const result = await translateViaApi(trimmed, from, to);
-      return res.json(result);
+      return res.json({ ...result, source: 'ai' });
+    } catch (err) {
+      console.error('[SomSpeak] Translation API error:', err.message);
+      // Determine whether the error is the API's fault or a config problem
+      const isTimeout = err.name === 'AbortError' || err.message.includes('abort');
+      const isAuth = err.message.includes('401') || err.message.includes('403');
+      const isServer = err.message.includes('5');
+      if (isAuth) {
+        return res.status(502).json({
+          error: 'The translation API rejected our credentials. Please check TRANSLATION_API_KEY.',
+          code: 'API_AUTH_ERROR',
+        });
+      }
+      if (isTimeout) {
+        return res.status(504).json({
+          error: 'The translation API timed out. Please try again.',
+          code: 'API_TIMEOUT',
+        });
+      }
+      // For server-side API errors, fall back to dictionary so the user still gets a result
+      console.warn('[SomSpeak] Falling back to built-in dictionary after API error.');
+      const fallback = smartTranslate(trimmed, from, to);
+      return res.json({ ...fallback, source: 'dictionary', fallback: true });
     }
-    // Fall back to smart phrase lookup
-    const result = smartTranslate(trimmed, from, to);
-    res.json(result);
-  } catch (error) {
-    console.error('Translation error:', error.message);
-    // Graceful degradation — still return smart lookup result
-    const result = smartTranslate(trimmed, from, to);
-    res.json(result);
   }
+
+  // ── Built-in smart dictionary (no API configured) ──
+  const result = smartTranslate(trimmed, from, to);
+  res.json({ ...result, source: 'dictionary' });
 });
 
+// ── Multi-provider translation API caller ────────────────────────────────────
 async function translateViaApi(text, from, to) {
-  const languages = { English: 'en', Arabic: 'ar', Turkish: 'tr', Somali: 'so' };
+  const langCodes = { English: 'en', Arabic: 'ar', Turkish: 'tr', Somali: 'so' };
+  const srcCode = langCodes[from];
+  const tgtCode = langCodes[to];
+  const apiUrl = process.env.TRANSLATION_API_URL;
+  const apiKey = process.env.TRANSLATION_API_KEY || '';
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  // ── Detect provider from URL and build the correct request body ──
+  let requestBody;
+  let requestHeaders = { 'Content-Type': 'application/json' };
+
+  if (apiUrl.includes('deepl')) {
+    // DeepL v2 API format
+    requestBody = JSON.stringify({
+      text: [text],
+      source_lang: srcCode.toUpperCase(),
+      target_lang: tgtCode.toUpperCase(),
+    });
+    requestHeaders['Authorization'] = `DeepL-Auth-Key ${apiKey}`;
+  } else {
+    // LibreTranslate / generic LibreTranslate-compatible format (most common)
+    requestBody = JSON.stringify({
+      q: text,
+      source: srcCode,
+      target: tgtCode,
+      format: 'text',
+      ...(apiKey ? { api_key: apiKey } : {}),
+    });
+    if (apiKey) requestHeaders['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  let response;
   try {
-    const response = await fetch(process.env.TRANSLATION_API_URL, {
+    response = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(process.env.TRANSLATION_API_KEY ? { Authorization: `Bearer ${process.env.TRANSLATION_API_KEY}` } : {}) },
-      body: JSON.stringify({ q: text, source: languages[from], target: languages[to], format: 'text' }),
+      headers: requestHeaders,
+      body: requestBody,
       signal: controller.signal,
     });
-    clearTimeout(timeout);
-    if (!response.ok) throw new Error(`Translation API responded with status ${response.status}`);
-    const data = await response.json();
-    const translation = data.translatedText || data.translation || text;
-    return { translation, pronunciation: '', example_sentence: '', example_translation: '', memory_tip: 'Repeat the translation aloud, then use it in a short sentence.' };
-  } catch (err) {
-    clearTimeout(timeout);
-    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({}));
+    throw new Error(
+      errBody.error || errBody.message || `API responded with HTTP ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  // ── Normalise response across provider formats ──
+  let translation;
+  if (apiUrl.includes('deepl') && Array.isArray(data.translations)) {
+    translation = data.translations[0]?.text || text;
+  } else {
+    translation = data.translatedText || data.translation || data.output || text;
+  }
+
+  return {
+    translation,
+    pronunciation: '',
+    example_sentence: '',
+    example_translation: '',
+    memory_tip: 'Repeat the translation aloud, then try using it in a short sentence of your own.',
+  };
 }
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production' || Boolean(process.env.RAILWAY_STATIC_URL);
