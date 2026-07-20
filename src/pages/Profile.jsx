@@ -417,6 +417,31 @@ export default function Profile() {
         <LogOut className="w-5 h-5" />
         <span className="font-medium text-sm">Sign Out</span>
       </motion.button>
+
+      {/* Developer & Copyright Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+        className="mt-6 mb-24 bg-card border border-border/50 rounded-2xl p-4 flex items-center gap-4 shadow-sm"
+      >
+        <img
+          src="/profile.jpeg"
+          alt="Ibrahim Abdullahi"
+          className="w-12 h-12 rounded-full object-cover border-2 border-primary/20"
+          onError={(e) => {
+            e.target.style.display = 'none';
+          }}
+        />
+        <div>
+          <p className="text-sm font-bold text-foreground">
+            Founder & Lead Developer: Ibrahim Abdullahi
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            © 2026 SomSpeak. All rights reserved.
+          </p>
+        </div>
+      </motion.div>
     </div>
   );
 }
